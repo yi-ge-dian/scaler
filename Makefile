@@ -26,3 +26,8 @@ docker-build: proto
 proto:
 	cd proto && protoc -I ./  serverless-sim.proto --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative && cd -
 
+dwl-login:
+	docker login --username=yi_ge_dian registry.cn-hangzhou.aliyuncs.com
+
+dwl-build:
+	docker buildx build --platform linux/amd64 -t registry.cn-hangzhou.aliyuncs.com/longzhou/scaler:v1.0 . --push
