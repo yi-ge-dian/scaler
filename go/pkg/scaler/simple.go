@@ -42,7 +42,7 @@ type Simple struct {
 	instances      map[string]*model2.Instance // instanceId => instance
 	idleInstance   *list.List                  // idle instance list
 	sem            chan Empty                  // Semaphores for implementing producer-consumer models
-	// flag           bool
+	flag           bool
 }
 
 func New(metaData *model2.Meta, config *config.Config) Scaler {
@@ -59,7 +59,7 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 		instances:      make(map[string]*model2.Instance),
 		idleInstance:   list.New(),
 		sem:            make(chan Empty, config.MaxConcurrency),
-		// flag:           false,
+		flag:           false,
 	}
 	log.Printf("New scaler for app: %s is created", metaData.Key)
 	scheduler.wg.Add(1)
@@ -106,7 +106,7 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 	}
 
 	// 2. create new Instance
-	go s.createInstance(ctx, request, instanceId)
+	go s.createInstance(request, instanceId)
 
 	<-s.sem // Block until IdleInstance is not empty, semaphore -1
 
@@ -134,13 +134,14 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 	return nil, status.Errorf(codes.Internal, "create new instance %s failed", instanceId)
 }
 
-func (s *Simple) createInstance(ctx context.Context, request *pb.AssignRequest, instanceId string) {
+func (s *Simple) createInstance(request *pb.AssignRequest, instanceId string) {
 	// 1. create slot
 	resourceConfig := model2.SlotResourceConfig{
 		ResourceConfig: pb.ResourceConfig{
 			MemoryInMegabytes: request.MetaData.MemoryInMb,
 		},
 	}
+	ctx := context.Background()
 	slot, err := s.platformClient.CreateSlot(ctx, request.RequestId, &resourceConfig)
 	if err != nil {
 		errorMessage := fmt.Sprintf("create slot failed with: %s", err.Error())
@@ -163,6 +164,11 @@ func (s *Simple) createInstance(ctx context.Context, request *pb.AssignRequest, 
 		return
 	}
 	s.mu.Lock()
+	if !s.flag {
+		s.flag = true
+		s.changeConfig(instance.Slot.CreateDurationInMs+uint64(instance.InitDurationInMs), instance.Meta.MemoryInMb)
+	}
+
 	instance.Busy = false
 	s.idleInstance.PushFront(instance)
 	s.instances[instance.Id] = instance
@@ -282,29 +288,41 @@ func (s *Simple) Stats() Stats {
 	}
 }
 
-// func (s *Simple) changeConfig(init uint64, memsize uint64) {
-// 	// var priority = float32(init) / float32(memsize)
-// 	// if priority <= 1 {
-// 	// 	s.config.IdleDurationBeforeGC = 30 * time.Second
-// 	// } else if priority > 1 && priority <= 10 {
-// 	// 	s.config.IdleDurationBeforeGC = 35 * time.Second
-// 	// } else if priority > 10 && priority <= 50 {
-// 	// 	s.config.IdleDurationBeforeGC = 40 * time.Minute
-// 	// } else if priority > 50 && priority <= 100 {
-// 	// 	s.config.IdleDurationBeforeGC = 1 * time.Minute
-// 	// }
-// 	if init < 200 {
-// 		s.config.GcInterval = time.Second
-// 		s.config.IdleDurationBeforeGC = 5 * time.Second
-// 	}
-// 	// } else if init >= 200 && init < 1000 {
-// 	// 	s.config.GcInterval = time.Second * 5
-// 	// 	s.config.IdleDurationBeforeGC = time.Second * 5
-// 	// } else if init >= 1000 && init < 10000 {
-// 	// 	s.config.GcInterval = time.Second * 5
-// 	// 	s.config.IdleDurationBeforeGC = time.Second * 15
-// 	// } else if init >= 10000 && init < 60000 {
-// 	// 	s.config.GcInterval = time.Second * 10
-// 	// 	s.config.IdleDurationBeforeGC = time.Second * 10000
-// 	// }
-// }
+// todo: 每隔 100 个请求，看用了多长时间，如果小于了 执行时间 ms，就批量创建 100 个, 来个 flag，是这个类型，在 Idle 中做flag，自己手动gc。
+// todo: 如果 大于了 512 ms ，就用 CV 判断一下是否具有典型性，具有典型，走 pre-warm 和 keep-alive
+// 如果 大于 1ms 小于 512ms，需不需要考虑 init 和 mem
+
+func (s *Simple) changeConfig(init uint64, memsize uint64) {
+
+	// var priority = float32(init) / float32(memsize)
+	// if priority <= 1 {
+	// 	s.config.IdleDurationBeforeGC = 30 * time.Second
+	// } else if priority > 1 && priority <= 10 {
+	// 	s.config.IdleDurationBeforeGC = 35 * time.Second
+	// } else if priority > 10 && priority <= 50 {
+	// 	s.config.IdleDurationBeforeGC = 40 * time.Minute
+	// } else if priority > 50 && priority <= 100 {
+	// 	s.config.IdleDurationBeforeGC = 1 * time.Minute
+	// }
+
+	// if init < 200 && memsize > 1000 {
+	// 	s.config.GcInterval = time.Second * 5
+	// 	s.config.IdleDurationBeforeGC = time.Second * 10
+	// }
+
+	if init <= 512 && memsize > 1000 {
+		s.config.GcInterval = time.Second * 3
+		s.config.IdleDurationBeforeGC = time.Second * 5
+	}
+
+	// } else if init >= 200 && init < 1000 {
+	// 	s.config.GcInterval = time.Second * 5
+	// 	s.config.IdleDurationBeforeGC = time.Second * 5
+	// } else if init >= 1000 && init < 10000 {
+	// 	s.config.GcInterval = time.Second * 5
+	// 	s.config.IdleDurationBeforeGC = time.Second * 15
+	// } else if init >= 10000 && init < 60000 {
+	// 	s.config.GcInterval = time.Second * 10
+	// 	s.config.IdleDurationBeforeGC = time.Second * 10000
+	// }
+}
