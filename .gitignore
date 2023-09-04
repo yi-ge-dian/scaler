@@ -1,6 +1,10 @@
 .idea
 _output
-/data/data_training/
+/data/data_training/dataSet_1
+/data/data_training/dataSet_2
+/data/data_training/dataSet_3
+/data/data_training/function_smoke_test
+
 /scaler
 /manifest/serverless-simulaion-test.yaml
 .vscode/

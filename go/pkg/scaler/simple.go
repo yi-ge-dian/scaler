@@ -289,7 +289,8 @@ func (s *Simple) Stats() Stats {
 }
 
 // todo: 每隔 100 个请求，看用了多长时间，如果小于了 执行时间 ms，就批量创建 100 个, 来个 flag，是这个类型，在 Idle 中做flag，自己手动gc。
-// todo: 如果 大于了 512 ms ，就用 CV 判断一下是否具有典型性，具有典型，走 pre-warm 和 keep-alive
+// todo: 如果 大于了 512 ms ，就用 CV 判断一下是否具有典型性，具有典型，走 pre-warm 和 keep-alive. CV =2 
+// 偏差 / 均值 
 // 如果 大于 1ms 小于 512ms，需不需要考虑 init 和 mem
 
 func (s *Simple) changeConfig(init uint64, memsize uint64) {
