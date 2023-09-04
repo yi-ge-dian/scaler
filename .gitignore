@@ -3,3 +3,6 @@ _output
 /data/data_training/
 /scaler
 /manifest/serverless-simulaion-test.yaml
+.vscode/
+# if you don't modify proto, don't push it
+/go/proto/*.pb.go

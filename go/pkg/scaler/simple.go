@@ -31,14 +31,18 @@ import (
 	"github.com/google/uuid"
 )
 
+type Empty struct{}
+
 type Simple struct {
-	config         *config.Config
-	metaData       *model2.Meta
-	platformClient platform_client2.Client
-	mu             sync.Mutex
-	wg             sync.WaitGroup
-	instances      map[string]*model2.Instance
-	idleInstance   *list.List
+	config         *config.Config              // config
+	metaData       *model2.Meta                // meta data
+	platformClient platform_client2.Client     // interface to call simulator
+	mu             sync.Mutex                  // lock
+	wg             sync.WaitGroup              // wait group
+	instances      map[string]*model2.Instance // instanceId => instance
+	idleInstance   *list.List                  // idle instance list
+	sem            chan Empty                  // Semaphores for implementing producer-consumer models
+	// flag           bool
 }
 
 func New(metaData *model2.Meta, config *config.Config) Scaler {
@@ -54,6 +58,8 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 		wg:             sync.WaitGroup{},
 		instances:      make(map[string]*model2.Instance),
 		idleInstance:   list.New(),
+		sem:            make(chan Empty, config.MaxConcurrency),
+		// flag:           false,
 	}
 	log.Printf("New scaler for app: %s is created", metaData.Key)
 	scheduler.wg.Add(1)
@@ -73,14 +79,48 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 		log.Printf("Assign, request id: %s, instance id: %s, cost %dms", request.RequestId, instanceId, time.Since(start).Milliseconds())
 	}()
 	log.Printf("Assign, request id: %s", request.RequestId)
-	s.mu.Lock()
+
+	// reuse instance
+	select {
+	case <-s.sem: // consume a semaphore
+		s.mu.Lock()
+		if element := s.idleInstance.Front(); element != nil {
+			instance := element.Value.(*model2.Instance)
+			instance.Busy = true
+			s.idleInstance.Remove(element)
+			s.mu.Unlock()
+			log.Printf("Assign, request id: %s, instance %s reused", request.RequestId, instance.Id)
+			instanceId = instance.Id
+			return &pb.AssignReply{
+				Status: pb.Status_Ok,
+				Assigment: &pb.Assignment{
+					RequestId:  request.RequestId,
+					MetaKey:    instance.Meta.Key,
+					InstanceId: instance.Id,
+				},
+				ErrorMessage: nil,
+			}, nil
+		}
+		s.mu.Unlock()
+	default:
+	}
+
+	// 2. create new Instance
+	go s.createInstance(ctx, request, instanceId)
+
+	<-s.sem // Block until IdleInstance is not empty, semaphore -1
+
+	s.mu.Lock() // Lock to prevent two requests from accessing the same instance at the same time
 	if element := s.idleInstance.Front(); element != nil {
 		instance := element.Value.(*model2.Instance)
+		if instance.Id == instanceId {
+			log.Printf("create new instance %s and use it to complete the request\n", instanceId)
+		} else {
+			log.Printf("Assign, request id: %s, instance %s reused(wait instance)", request.RequestId, instance.Id)
+		}
 		instance.Busy = true
 		s.idleInstance.Remove(element)
 		s.mu.Unlock()
-		log.Printf("Assign, request id: %s, instance %s reused", request.RequestId, instance.Id)
-		instanceId = instance.Id
 		return &pb.AssignReply{
 			Status: pb.Status_Ok,
 			Assigment: &pb.Assignment{
@@ -91,9 +131,11 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 			ErrorMessage: nil,
 		}, nil
 	}
-	s.mu.Unlock()
+	return nil, status.Errorf(codes.Internal, "create new instance %s failed", instanceId)
+}
 
-	// create new Instance
+func (s *Simple) createInstance(ctx context.Context, request *pb.AssignRequest, instanceId string) {
+	// 1. create slot
 	resourceConfig := model2.SlotResourceConfig{
 		ResourceConfig: pb.ResourceConfig{
 			MemoryInMegabytes: request.MetaData.MemoryInMb,
@@ -102,10 +144,11 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 	slot, err := s.platformClient.CreateSlot(ctx, request.RequestId, &resourceConfig)
 	if err != nil {
 		errorMessage := fmt.Sprintf("create slot failed with: %s", err.Error())
-		log.Printf(errorMessage)
-		return nil, status.Errorf(codes.Internal, errorMessage)
+		log.Print(errorMessage)
+		return
 	}
 
+	// 2. init instance
 	meta := &model2.Meta{
 		Meta: pb.Meta{
 			Key:           request.MetaData.Key,
@@ -116,32 +159,25 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 	instance, err := s.platformClient.Init(ctx, request.RequestId, instanceId, slot, meta)
 	if err != nil {
 		errorMessage := fmt.Sprintf("create instance failed with: %s", err.Error())
-		log.Printf(errorMessage)
-		return nil, status.Errorf(codes.Internal, errorMessage)
+		log.Print(errorMessage)
+		return
 	}
-
-	//add new instance
 	s.mu.Lock()
-	instance.Busy = true
+	instance.Busy = false
+	s.idleInstance.PushFront(instance)
 	s.instances[instance.Id] = instance
+	s.sem <- Empty{} // produce a semaphore
+	log.Printf("create new instance %s success by request %s\n", instanceId, request.RequestId)
 	s.mu.Unlock()
-	log.Printf("request id: %s, instance %s for app %s is created, init latency: %dms", request.RequestId, instance.Id, instance.Meta.Key, instance.InitDurationInMs)
-
-	return &pb.AssignReply{
-		Status: pb.Status_Ok,
-		Assigment: &pb.Assignment{
-			RequestId:  request.RequestId,
-			MetaKey:    instance.Meta.Key,
-			InstanceId: instance.Id,
-		},
-		ErrorMessage: nil,
-	}, nil
 }
 
 func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error) {
+	// 1. check request
 	if request.Assigment == nil {
-		return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("assignment is nil"))
+		return nil, status.Errorf(codes.InvalidArgument, "assignment is nil")
 	}
+
+	// 2. get instanceId from request assignment
 	reply := &pb.IdleReply{
 		Status:       pb.Status_Ok,
 		ErrorMessage: nil,
@@ -151,6 +187,8 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 	defer func() {
 		log.Printf("Idle, request id: %s, instance: %s, cost %dus", request.Assigment.RequestId, instanceId, time.Since(start).Microseconds())
 	}()
+
+	// 3. check instance whether need destroy
 	needDestroy := false
 	slotId := ""
 	if request.Result != nil && request.Result.NeedDestroy != nil && *request.Result.NeedDestroy {
@@ -161,26 +199,35 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 			s.deleteSlot(ctx, request.Assigment.RequestId, slotId, instanceId, request.Assigment.MetaKey, "bad instance")
 		}
 	}()
+
+	// 4. idle instance
 	log.Printf("Idle, request id: %s", request.Assigment.RequestId)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if instance := s.instances[instanceId]; instance != nil {
 		slotId = instance.Slot.Id
 		instance.LastIdleTime = time.Now()
+		// 4.1 if need destroy, then delete slot at defer function
 		if needDestroy {
 			log.Printf("request id %s, instance %s need be destroy", request.Assigment.RequestId, instanceId)
 			return reply, nil
 		}
 
-		if instance.Busy == false {
+		// 4.2 if not need destroy, the instance has been freed
+		if !instance.Busy {
 			log.Printf("request id %s, instance %s already freed", request.Assigment.RequestId, instanceId)
 			return reply, nil
 		}
+
+		// 4.3 if not need destroy, add it to idle list
 		instance.Busy = false
 		s.idleInstance.PushFront(instance)
+		s.sem <- Empty{} // Idle list gets longer, semaphore + 1
 	} else {
 		return nil, status.Errorf(codes.NotFound, fmt.Sprintf("request id %s, instance %s not found", request.Assigment.RequestId, instanceId))
 	}
+
+	// 5. return reply
 	return &pb.IdleReply{
 		Status:       pb.Status_Ok,
 		ErrorMessage: nil,
@@ -188,7 +235,7 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 }
 
 func (s *Simple) deleteSlot(ctx context.Context, requestId, slotId, instanceId, metaKey, reason string) {
-	log.Printf("start delete Instance %s (Slot: %s) of app: %s", instanceId, slotId, metaKey)
+	log.Printf("start delete Instance %s (Slot: %s) of app: %s,reason %s,request: %s", instanceId, slotId, metaKey, reason, requestId)
 	if err := s.platformClient.DestroySLot(ctx, requestId, slotId, reason); err != nil {
 		log.Printf("delete Instance %s (Slot: %s) of app: %s failed with: %s", instanceId, slotId, metaKey, err.Error())
 	}
@@ -202,9 +249,10 @@ func (s *Simple) gcLoop() {
 			s.mu.Lock()
 			if element := s.idleInstance.Back(); element != nil {
 				instance := element.Value.(*model2.Instance)
-				idleDuration := time.Now().Sub(instance.LastIdleTime)
+				idleDuration := time.Since(instance.LastIdleTime)
 				if idleDuration > s.config.IdleDurationBeforeGC {
 					//need GC
+					<-s.sem // Consuming a semaphore
 					s.idleInstance.Remove(element)
 					delete(s.instances, instance.Id)
 					s.mu.Unlock()
@@ -233,3 +281,30 @@ func (s *Simple) Stats() Stats {
 		TotalIdleInstance: s.idleInstance.Len(),
 	}
 }
+
+// func (s *Simple) changeConfig(init uint64, memsize uint64) {
+// 	// var priority = float32(init) / float32(memsize)
+// 	// if priority <= 1 {
+// 	// 	s.config.IdleDurationBeforeGC = 30 * time.Second
+// 	// } else if priority > 1 && priority <= 10 {
+// 	// 	s.config.IdleDurationBeforeGC = 35 * time.Second
+// 	// } else if priority > 10 && priority <= 50 {
+// 	// 	s.config.IdleDurationBeforeGC = 40 * time.Minute
+// 	// } else if priority > 50 && priority <= 100 {
+// 	// 	s.config.IdleDurationBeforeGC = 1 * time.Minute
+// 	// }
+// 	if init < 200 {
+// 		s.config.GcInterval = time.Second
+// 		s.config.IdleDurationBeforeGC = 5 * time.Second
+// 	}
+// 	// } else if init >= 200 && init < 1000 {
+// 	// 	s.config.GcInterval = time.Second * 5
+// 	// 	s.config.IdleDurationBeforeGC = time.Second * 5
+// 	// } else if init >= 1000 && init < 10000 {
+// 	// 	s.config.GcInterval = time.Second * 5
+// 	// 	s.config.IdleDurationBeforeGC = time.Second * 15
+// 	// } else if init >= 10000 && init < 60000 {
+// 	// 	s.config.GcInterval = time.Second * 10
+// 	// 	s.config.IdleDurationBeforeGC = time.Second * 10000
+// 	// }
+// }
