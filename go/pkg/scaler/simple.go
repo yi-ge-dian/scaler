@@ -366,7 +366,9 @@ func (s *Simple) Stats() Stats {
 
 // pre warm 计算： 100ms(slot create) + initTime = pre warm 窗口；keep alive开始时间 - pre warm 窗口 - random (1,10)ms  = pre warm 开始时间
 // keep alive 计算： 取得IT的分位数 25% 75%； 75%为keep alive结束时间，25%为keep alive开始时间
-// pre warm 窗口与keep alive窗口需要比较大小，若keep alive窗口< pre warm ->无需预热
+// 75% < ( init + 100 ) * 2, idle = 75% * 2,prewarm =0
+
+
 
 // changeconfig 应该什么时候调用？
 // A:判断是否具有并发特性，需要调用changeconfig
