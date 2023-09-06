@@ -34,15 +34,18 @@ import (
 type Empty struct{}
 
 type Simple struct {
-	config         *config.Config              // config
-	metaData       *model2.Meta                // meta data
-	platformClient platform_client2.Client     // interface to call simulator
-	mu             sync.Mutex                  // lock
-	wg             sync.WaitGroup              // wait group
-	instances      map[string]*model2.Instance // instanceId => instance
-	idleInstance   *list.List                  // idle instance list
-	sem            chan Empty                  // Semaphores for implementing producer-consumer models
-	flag           bool
+	config           *config.Config              // config
+	metaData         *model2.Meta                // meta data
+	platformClient   platform_client2.Client     // interface to call simulator
+	mu               sync.Mutex                  // lock
+	wg               sync.WaitGroup              // wait group
+	instances        map[string]*model2.Instance // instanceId => instance
+	idleInstance     *list.List                  // idle instance list
+	sem              chan Empty                  // Semaphores for implementing producer-consumer models
+	flag             bool
+	requestCount     chan Empty // request count , 相比于atomic.add可以控制并发度
+	onceChangeConfig sync.Once  // change config and only do once
+	durationInMs     uint64     // duration in ms
 }
 
 func New(metaData *model2.Meta, config *config.Config) Scaler {
@@ -59,7 +62,9 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 		instances:      make(map[string]*model2.Instance),
 		idleInstance:   list.New(),
 		sem:            make(chan Empty, config.MaxConcurrency),
-		flag:           false,
+		requestCount:   make(chan Empty, 1000), // buffer size determine the concurrency degree
+		flag:           false,                  // flag to judge whether the requests are typical
+		durationInMs:   uint64(time.Millisecond),
 	}
 	log.Printf("New scaler for app: %s is created", metaData.Key)
 	scheduler.wg.Add(1)
@@ -68,7 +73,24 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 		scheduler.gcLoop()
 		log.Printf("gc loop for app: %s is stoped", metaData.Key)
 	}()
-
+	scheduler.wg.Add(1)
+	go func() {
+		defer scheduler.wg.Done()
+		counter := 0
+		start := time.Now()
+		for range scheduler.requestCount {
+			counter++
+			if counter%100 == 0 {
+				if uint64(time.Since(start)) < scheduler.durationInMs {
+					scheduler.flag = true
+					// TODO 需要一个东西去取消flag(定时器？)
+					for i := 0; i < 100; i++ {
+						go scheduler.createInstance(nil, uuid.New().String())
+					}
+				}
+			}
+		}
+	}()
 	return scheduler
 }
 
@@ -136,6 +158,17 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 
 func (s *Simple) createInstance(request *pb.AssignRequest, instanceId string) {
 	// 1. create slot
+	if request == nil {
+		request = &pb.AssignRequest{
+			RequestId: uuid.New().String(),
+			MetaData: &pb.Meta{
+				Key:           s.metaData.Key,
+				Runtime:       s.metaData.Runtime,
+				TimeoutInSecs: s.metaData.TimeoutInSecs,
+				MemoryInMb:    s.metaData.MemoryInMb,
+			},
+		}
+	}
 	resourceConfig := model2.SlotResourceConfig{
 		ResourceConfig: pb.ResourceConfig{
 			MemoryInMegabytes: request.MetaData.MemoryInMb,
@@ -163,12 +196,10 @@ func (s *Simple) createInstance(request *pb.AssignRequest, instanceId string) {
 		log.Print(errorMessage)
 		return
 	}
-	s.mu.Lock()
-	if !s.flag {
-		s.flag = true
+	s.onceChangeConfig.Do(func() {
 		s.changeConfig(instance.Slot.CreateDurationInMs+uint64(instance.InitDurationInMs), instance.Meta.MemoryInMb)
-	}
-
+	}) // change config by call it once, and do not block the thread
+	s.mu.Lock()
 	instance.Busy = false
 	s.idleInstance.PushFront(instance)
 	s.instances[instance.Id] = instance
@@ -189,6 +220,12 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 		ErrorMessage: nil,
 	}
 	start := time.Now()
+	s.durationInMs = func(x, y uint64) uint64 {
+		if x < y {
+			return x
+		}
+		return y
+	}(request.Result.DurationInMs, s.durationInMs)
 	instanceId := request.Assigment.InstanceId
 	defer func() {
 		log.Printf("Idle, request id: %s, instance: %s, cost %dus", request.Assigment.RequestId, instanceId, time.Since(start).Microseconds())
@@ -288,9 +325,12 @@ func (s *Simple) Stats() Stats {
 	}
 }
 
-// todo: 每隔 100 个请求，看用了多长时间，如果小于了 执行时间 ms，就批量创建 100 个, 来个 flag，是这个类型，在 Idle 中做flag，自己手动gc。
-// todo: 如果 大于了 512 ms ，就用 CV 判断一下是否具有典型性，具有典型，走 pre-warm 和 keep-alive. CV =2 
-// 偏差 / 均值 
+// TODO: 每隔 100 个请求，看用了多长时间，如果小于了 执行时间 ms，就批量创建 100 个, 来个 flag，是这个类型，在 Idle 中做flag，自己手动gc。
+// 并发度: QPMS * 执行时间 / 1000
+// 变量：请求计数，
+
+// TODO: 如果 大于了 512 ms ，就用 CV 判断一下是否具有典型性，具有典型，走 pre-warm 和 keep-alive. CV =2
+// 偏差 / 均值
 // 如果 大于 1ms 小于 512ms，需不需要考虑 init 和 mem
 
 func (s *Simple) changeConfig(init uint64, memsize uint64) {
