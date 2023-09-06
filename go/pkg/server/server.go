@@ -40,13 +40,14 @@ func New() *Server {
 
 func (s *Server) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.AssignReply, error) {
 	if request.MetaData == nil {
-		return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("app meta is nil"))
+		return nil, status.Errorf(codes.InvalidArgument, "app meta is nil")
 	}
 	metaData := &model.Meta{
 		Meta: pb.Meta{
 			Key:           request.MetaData.Key,
 			Runtime:       request.MetaData.Runtime,
 			TimeoutInSecs: request.MetaData.TimeoutInSecs,
+			MemoryInMb:    request.MetaData.MemoryInMb,
 		},
 	}
 	scheduler := s.mgr.GetOrCreate(metaData)
@@ -55,7 +56,7 @@ func (s *Server) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 
 func (s *Server) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error) {
 	if request.Assigment == nil {
-		return nil, status.Errorf(codes.InvalidArgument, fmt.Sprintf("assignment is nil"))
+		return nil, status.Errorf(codes.InvalidArgument, "assignment is nil")
 	}
 	key := request.Assigment.MetaKey
 	scheduler, err := s.mgr.Get(key)
