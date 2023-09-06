@@ -42,10 +42,10 @@ type Simple struct {
 	instances        map[string]*model2.Instance // instanceId => instance
 	idleInstance     *list.List                  // idle instance list
 	sem              chan Empty                  // Semaphores for implementing producer-consumer models
-	flag             bool
-	requestCount     chan Empty // request count , 相比于atomic.add可以控制并发度
-	onceChangeConfig sync.Once  // change config and only do once
-	durationInMs     uint64     // duration in ms
+	flag             bool                        // flag to judge whether the requests are concurrent
+	requestCount     chan Empty                  // request count , 相比于atomic.add可以控制并发度
+	onceChangeConfig sync.Once                   // change config and only do once
+	durationInMs     uint64                      // duration in ms
 }
 
 func New(metaData *model2.Meta, config *config.Config) Scaler {
@@ -82,11 +82,19 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 			counter++
 			if counter%100 == 0 {
 				if uint64(time.Since(start)) < scheduler.durationInMs {
+					start = time.Now()
 					scheduler.flag = true
-					// TODO 需要一个东西去取消flag(定时器？)
+
 					for i := 0; i < 100; i++ {
 						go scheduler.createInstance(nil, uuid.New().String())
 					}
+
+					// after a period of time, cancel the flag
+					go func() {
+						ticker := time.NewTicker(scheduler.config.GcInterval)
+						<-ticker.C
+						scheduler.flag = false
+					}()
 				}
 			}
 		}
@@ -247,6 +255,7 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 	log.Printf("Idle, request id: %s", request.Assigment.RequestId)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if instance := s.instances[instanceId]; instance != nil {
 		slotId = instance.Slot.Id
 		instance.LastIdleTime = time.Now()
@@ -262,7 +271,20 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 			return reply, nil
 		}
 
-		// 4.3 if not need destroy, add it to idle list
+		// 4.3 our gc
+		if s.flag {
+			delete(s.instances, instance.Id)
+			go func() {
+				reason := ("our gc")
+				ctx := context.Background()
+				ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				s.deleteSlot(ctx, uuid.NewString(), instance.Slot.Id, instance.Id, instance.Meta.Key, reason)
+			}()
+			return reply, nil
+		}
+
+		// 4.4 if not need destroy, add it to idle list
 		instance.Busy = false
 		s.idleInstance.PushFront(instance)
 		s.sem <- Empty{} // Idle list gets longer, semaphore + 1
@@ -351,7 +373,7 @@ func (s *Simple) changeConfig(init uint64, memsize uint64) {
 	// 	s.config.IdleDurationBeforeGC = time.Second * 10
 	// }
 
-	if init <= 512 && memsize > 1000 {
+	if init <= 200 && memsize > 1000 {
 		s.config.GcInterval = time.Second * 3
 		s.config.IdleDurationBeforeGC = time.Second * 5
 	}
