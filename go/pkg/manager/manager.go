@@ -15,17 +15,19 @@ package manager
 
 import (
 	"fmt"
-	"github.com/AliyunContainerService/scaler/go/pkg/config"
-	"github.com/AliyunContainerService/scaler/go/pkg/model"
-	scaler2 "github.com/AliyunContainerService/scaler/go/pkg/scaler"
 	"log"
 	"sync"
+
+	"github.com/AliyunContainerService/scaler/go/pkg/config"
+	model2 "github.com/AliyunContainerService/scaler/go/pkg/model"
+	scaler2 "github.com/AliyunContainerService/scaler/go/pkg/scaler"
 )
 
 type Manager struct {
 	rw         sync.RWMutex
 	schedulers map[string]scaler2.Scaler
 	config     *config.Config
+	offline    map[string]*model2.OfflineMeta
 }
 
 func New(config *config.Config) *Manager {
@@ -33,10 +35,11 @@ func New(config *config.Config) *Manager {
 		rw:         sync.RWMutex{},
 		schedulers: make(map[string]scaler2.Scaler),
 		config:     config,
+		offline:    model2.NewOfflineMeta(),
 	}
 }
 
-func (m *Manager) GetOrCreate(metaData *model.Meta) scaler2.Scaler {
+func (m *Manager) GetOrCreate(metaData *model2.Meta) scaler2.Scaler {
 	m.rw.RLock()
 	if scheduler := m.schedulers[metaData.Key]; scheduler != nil {
 		m.rw.RUnlock()
@@ -50,7 +53,7 @@ func (m *Manager) GetOrCreate(metaData *model.Meta) scaler2.Scaler {
 		return scheduler
 	}
 	log.Printf("Create new scaler for app %s", metaData.Key)
-	scheduler := scaler2.New(metaData, m.config)
+	scheduler := scaler2.New(metaData, m.config, m.offline)
 	m.schedulers[metaData.Key] = scheduler
 	m.rw.Unlock()
 	return scheduler

@@ -21,8 +21,9 @@ import (
 type Config struct {
 	ClientAddr           string
 	GcInterval           time.Duration
-	IdleDurationBeforeGC time.Duration
+	IdleDurationBeforeGC time.Duration // keep alive
 	MaxConcurrency       int
+	PreWarm              time.Duration
 }
 
 var DefaultConfig = Config{
@@ -30,4 +31,5 @@ var DefaultConfig = Config{
 	GcInterval:           10 * time.Second,
 	IdleDurationBeforeGC: 30 * time.Second, // start is 5 min, 30s is best now
 	MaxConcurrency:       math.MaxInt32,
+	PreWarm:              0 * time.Second,
 }

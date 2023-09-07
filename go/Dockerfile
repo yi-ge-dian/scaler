@@ -28,6 +28,7 @@ COPY --from=builder /build /app/source
 
 # Copy the startup script.
 COPY run.sh run.sh
+COPY idle_time_stats.csv idle_time_stats.csv
 RUN chmod +x run.sh
 
 

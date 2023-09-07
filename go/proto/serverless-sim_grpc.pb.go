@@ -190,10 +190,10 @@ func (c *platformClient) Init(ctx context.Context, in *InitRequest, opts ...grpc
 // All implementations must embed UnimplementedPlatformServer
 // for forward compatibility
 type PlatformServer interface {
-	// Slot
+	//Slot
 	CreateSlot(context.Context, *CreateSlotRequest) (*CreateSlotReply, error)
 	DestroySlot(context.Context, *DestroySlotRequest) (*DestroySlotReply, error)
-	// Init
+	//Init
 	Init(context.Context, *InitRequest) (*InitReply, error)
 	mustEmbedUnimplementedPlatformServer()
 }

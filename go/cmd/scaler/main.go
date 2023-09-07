@@ -14,9 +14,10 @@ limitations under the License.
 package main
 
 import (
-	"github.com/AliyunContainerService/scaler/go/pkg/server"
 	"log"
 	"net"
+
+	"github.com/AliyunContainerService/scaler/go/pkg/server"
 
 	"google.golang.org/grpc"
 
