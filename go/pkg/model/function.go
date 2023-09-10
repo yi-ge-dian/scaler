@@ -104,6 +104,5 @@ func NewOfflineMeta() map[string]*OfflineMeta {
 			}
 		}
 	}
-	log.Println(offlineMetaMap)
 	return offlineMetaMap
 }

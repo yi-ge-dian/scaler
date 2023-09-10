@@ -53,9 +53,10 @@ func New(metaData *model2.Meta, config *config.Config, offline map[string]*model
 	if err != nil {
 		log.Fatalf("client init with error: %s", err.Error())
 	}
+	myconfig := *config
 	// new scaler
 	s := &Simple{
-		config:                   config,                                  // default config
+		config:                   &myconfig,                               // default config
 		metaData:                 metaData,                                // request metadata
 		platformClient:           client,                                  // platform client
 		mu:                       sync.Mutex{},                            // lock
@@ -89,7 +90,6 @@ func New(metaData *model2.Meta, config *config.Config, offline map[string]*model
 				log.Print("离线高并发模式结束")
 			}()
 		} else {
-			//TODO: 改一下idle_time_stats.csv，bins=200,重写cv
 			s.isOfflineHighConcurrency = false
 			// keep alive 计算： 取得IT的分位数 25% 75%； 75%为keep alive结束时间，25%为keep alive开始时间
 			keep_alive_min := time.Duration(s.offlineMeta.P25) * time.Millisecond
@@ -99,6 +99,7 @@ func New(metaData *model2.Meta, config *config.Config, offline map[string]*model
 			if keep_alive_max < (100*time.Millisecond+time.Duration(s.offlineMeta.InitDurationInMs)*time.Millisecond)*2 {
 				s.config.IdleDurationBeforeGC = keep_alive_max * 2
 				s.config.PreWarm = 0
+				log.Printf("Idle time less than init time,metaKey: %s,gc time: %s", s.metaData.Key, s.config.IdleDurationBeforeGC)
 			} else {
 				if s.offlineMeta.Cv > 10 {
 					// pre warm 计算： 100ms(slot create) + initTime = pre warm 窗口；
@@ -108,6 +109,7 @@ func New(metaData *model2.Meta, config *config.Config, offline map[string]*model
 						(time.Duration(1+rand.Intn(10)) * time.Millisecond)
 					s.config.PreWarm = pre_warm_start
 					s.config.IdleDurationBeforeGC = keep_alive
+					log.Printf("cv mode,cv : %v,preWarm: %v,idle time: %v", s.offlineMeta.Cv, s.config.PreWarm, s.config.IdleDurationBeforeGC)
 				} else {
 					// default config
 				}
@@ -329,10 +331,11 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 						MemoryInMb:    s.metaData.MemoryInMb,
 					},
 				}
+				log.Printf("time is up: %v,cv create new instance,meta key: %v", s.config.PreWarm, s.metaData.Key)
 				s.createInstance(assignRequest, uuid.NewString())
 			}()
+			return reply, nil
 		}
-
 		// 4.5 if not need destroy, add it to idle list
 		instance.Busy = false
 		s.idleInstance.PushFront(instance)
