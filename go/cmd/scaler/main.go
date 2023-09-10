@@ -14,8 +14,10 @@ limitations under the License.
 package main
 
 import (
+	"io"
 	"log"
 	"net"
+	"os"
 
 	"github.com/AliyunContainerService/scaler/go/pkg/server"
 
@@ -25,7 +27,15 @@ import (
 )
 
 func main() {
-	log.SetFlags(log.Ldate | log.LstdFlags)
+	f, err := os.OpenFile("/app/log/scaler.log", os.O_CREATE|os.O_APPEND|os.O_RDWR, os.ModePerm)
+	if err != nil {
+		return
+	}
+	defer func() {
+		f.Close()
+	}()
+	multiWriter := io.MultiWriter(os.Stdout, f)
+	log.SetOutput(multiWriter)
 
 	lis, err := net.Listen("tcp", ":9001")
 	if err != nil {

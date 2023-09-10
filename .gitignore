@@ -3,3 +3,5 @@ _output
 /data/data_training/
 /scaler
 /manifest/serverless-simulaion-test.yaml
+/go/log/*
+/go/proto/*
