@@ -14,9 +14,10 @@ limitations under the License.
 package main
 
 import (
-	"github.com/AliyunContainerService/scaler/go/pkg/server"
 	"log"
 	"net"
+
+	"github.com/AliyunContainerService/scaler/go/pkg/server"
 
 	"google.golang.org/grpc"
 
@@ -24,6 +25,8 @@ import (
 )
 
 func main() {
+	log.SetFlags(log.Ldate | log.LstdFlags)
+
 	lis, err := net.Listen("tcp", ":9001")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)

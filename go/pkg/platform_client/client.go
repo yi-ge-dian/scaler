@@ -16,10 +16,11 @@ package platform_client
 import (
 	"context"
 	"fmt"
-	model2 "github.com/AliyunContainerService/scaler/go/pkg/model"
 	"io"
 	"log"
 	"time"
+
+	model2 "github.com/AliyunContainerService/scaler/go/pkg/model"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

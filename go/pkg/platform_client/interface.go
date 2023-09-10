@@ -15,8 +15,9 @@ package platform_client
 
 import (
 	"context"
-	model2 "github.com/AliyunContainerService/scaler/go/pkg/model"
 	"io"
+
+	model2 "github.com/AliyunContainerService/scaler/go/pkg/model"
 )
 
 type Client interface {
