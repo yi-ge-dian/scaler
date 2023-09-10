@@ -3,5 +3,7 @@ _output
 /data/data_training/
 /scaler
 /manifest/serverless-simulaion-test.yaml
-/go/log/*
-/go/proto/*
+log/test
+log/scaler.log
+/go/proto/serverless-sim_grpc.pb.go
+/go/proto/serverless-sim.pb.go

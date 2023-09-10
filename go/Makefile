@@ -41,7 +41,7 @@ load:
 create:
 	kubectl apply -f ../manifest/serverless-simulaion.yaml
 
-local: build load create
+local: build delete load create
 
 create-cluster:
 	kind create cluster --config ../manifest/kind.yaml
