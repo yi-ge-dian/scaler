@@ -76,7 +76,7 @@ func NewOfflineMeta() map[string]*OfflineMeta {
 		log.Fatal("1 ", err)
 	}
 	_ = dec.Header()
-	log.Println(dec.Header())
+	// log.Println(dec.Header())
 
 	for {
 		u := IdleTimeStats{}
@@ -85,7 +85,7 @@ func NewOfflineMeta() map[string]*OfflineMeta {
 		} else if err != nil {
 			log.Fatal("2 ", err)
 		}
-		log.Println(u)
+		// log.Println(u)
 		// 是不是高并发
 		if u.P25 == 0 && u.P50 == 0 && u.P75 == 0 {
 			offlineMetaMap[u.MetaKey] = &OfflineMeta{

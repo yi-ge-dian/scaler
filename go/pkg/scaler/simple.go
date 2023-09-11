@@ -94,9 +94,10 @@ func New(metaData *model2.Meta, config *config.Config, offline map[string]*model
 			// keep alive 计算： 取得IT的分位数 25% 75%； 75%为keep alive结束时间，25%为keep alive开始时间
 			keep_alive_min := time.Duration(s.offlineMeta.P25) * time.Millisecond
 			keep_alive_max := time.Duration(s.offlineMeta.P75) * time.Millisecond
-			keep_alive := keep_alive_max - keep_alive_min + time.Duration(1+rand.Intn(10))*time.Millisecond
+			keep_alive := keep_alive_max - keep_alive_min + time.Duration(1+rand.Intn(2))*time.Second
 			// 75% < ( init + 100 ) * 2, idle = 75% * 2,prewarm =0
 			if keep_alive_max < (100*time.Millisecond+time.Duration(s.offlineMeta.InitDurationInMs)*time.Millisecond)*2 {
+				//TODO 尝试改成0.99分位数
 				s.config.IdleDurationBeforeGC = keep_alive_max * 2
 				s.config.PreWarm = 0
 				log.Printf("Idle time less than init time,metaKey: %s,gc time: %s", s.metaData.Key, s.config.IdleDurationBeforeGC)
@@ -106,7 +107,7 @@ func New(metaData *model2.Meta, config *config.Config, offline map[string]*model
 					// keep alive min - pre warm 窗口 - random (1,10)ms  = pre warm 开始时间
 					pre_warm_start := keep_alive_min -
 						(100*time.Millisecond + time.Duration(s.offlineMeta.InitDurationInMs)*time.Millisecond) -
-						(time.Duration(1+rand.Intn(10)) * time.Millisecond)
+						(time.Duration(1+rand.Intn(3)) * time.Second)
 					s.config.PreWarm = pre_warm_start
 					s.config.IdleDurationBeforeGC = keep_alive
 					log.Printf("cv mode,cv : %v,preWarm: %v,idle time: %v", s.offlineMeta.Cv, s.config.PreWarm, s.config.IdleDurationBeforeGC)
@@ -141,7 +142,7 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 	start := time.Now()
 	instanceId := uuid.New().String()
 	defer func() {
-		log.Printf("Assign, request id: %s, instance id: %s, cost %dms", request.RequestId, instanceId, time.Since(start).Milliseconds())
+		log.Printf("Assign, request id: %s, metaKey: %s,instance id: %s, cost %dms", request.RequestId, request.MetaData.Key, instanceId, time.Since(start).Milliseconds())
 	}()
 	log.Printf("Assign, request id: %s", request.RequestId)
 
@@ -154,7 +155,7 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 			instance.Busy = true
 			s.idleInstance.Remove(element)
 			s.mu.Unlock()
-			log.Printf("Assign, request id: %s, instance %s reused", request.RequestId, instance.Id)
+			log.Printf("Assign, request id: %s, metaKey: %s,instance %s reused", request.RequestId, request.MetaData.Key, instance.Id)
 			instanceId = instance.Id
 			return &pb.AssignReply{
 				Status: pb.Status_Ok,
@@ -246,7 +247,7 @@ func (s *Simple) createInstance(request *pb.AssignRequest, instanceId string) {
 	s.idleInstance.PushFront(instance)
 	s.instances[instance.Id] = instance
 	s.sem <- Empty{} // produce a semaphore
-	log.Printf("create new instance %s success by request %s\n", instanceId, request.RequestId)
+	log.Printf("create new instance %s success by request %s,metaKey: %s\n", instanceId, request.RequestId, request.MetaData.Key)
 	s.mu.Unlock()
 }
 
@@ -264,7 +265,7 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 	start := time.Now()
 	instanceId := request.Assigment.InstanceId
 	defer func() {
-		log.Printf("Idle, request id: %s, instance: %s, cost %dus", request.Assigment.RequestId, instanceId, time.Since(start).Microseconds())
+		log.Printf("Idle, request id: %s, metaKey: %s,instance: %s, cost %dus", request.Assigment.RequestId, s.metaData.Key, instanceId, time.Since(start).Microseconds())
 	}()
 
 	// 3. check instance whether need destroy
