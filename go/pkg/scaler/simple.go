@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math/rand"
+	"math"
 	"sync"
 	"time"
 
@@ -76,9 +76,10 @@ func New(metaData *model2.Meta, config *config.Config, offline map[string]*model
 		// 如果又来了几个了呢？
 		// 过一小段时间后，我们把这个离线的flag改成false
 		// **** (todo)如果是这个情况呢？  1  11111  1， 我们可能需要一个ticker来重置计数
-		// **** 但是这种情况好像不会发生
+		// ****
 		if offlineMeta.IsHighConcurrency {
 			s.isOfflineHighConcurrency = true
+			s.config.IdleDurationBeforeGC = time.Duration(s.offlineMeta.HighConcurrencyDuration) * time.Millisecond
 			// after a period of time, cancel the flag
 			go func() {
 				ticker := time.NewTicker(time.Duration(s.offlineMeta.HighConcurrencyDuration))
@@ -93,7 +94,7 @@ func New(metaData *model2.Meta, config *config.Config, offline map[string]*model
 			// keep alive 计算： 取得IT的分位数 25% 75%； 75%为keep alive结束时间，25%为keep alive开始时间
 			keep_alive_min := time.Duration(s.offlineMeta.P25) * time.Millisecond
 			keep_alive_max := time.Duration(s.offlineMeta.P75) * time.Millisecond
-			keep_alive := keep_alive_max - keep_alive_min + time.Duration(1+rand.Intn(2))*time.Second
+			keep_alive := keep_alive_max - keep_alive_min + 1*time.Second
 			// 75% < ( init + 100 ) * 2, idle = rount(P99),prewarm =0
 			if keep_alive_max < (100*time.Millisecond+time.Duration(s.offlineMeta.InitDurationInMs)*time.Millisecond)*2 {
 				//用0.99分位数 解决 11111______111111____11111的问题
@@ -104,10 +105,19 @@ func New(metaData *model2.Meta, config *config.Config, offline map[string]*model
 				if s.offlineMeta.Cv > 10 {
 					// pre warm 计算： 100ms(slot create) + initTime = pre warm 窗口；
 					// keep alive min - pre warm 窗口 - random (1,10)ms  = pre warm 开始时间
-					pre_warm_start := keep_alive_min -
-						(100*time.Millisecond + time.Duration(s.offlineMeta.InitDurationInMs)*time.Millisecond) -
-						(time.Duration(1+rand.Intn(3)) * time.Second)
+					init_time := 100*time.Millisecond + time.Duration(s.offlineMeta.InitDurationInMs)*time.Millisecond
+					pre_warm_start := time.Duration(math.Max(float64(keep_alive_min-
+						init_time-(1*time.Second)), 0.))
+					// pre warm 根据的是25这个点
+					// 如果25这个点很小或者为0
+					// 将导致pre warm 很小或者为负数
+					// 如何解决
+					// 事实上可能很多请求都是 1_________111111_______1________1111
+					if pre_warm_start < init_time*2 {
+						pre_warm_start = 0
+					}
 					s.config.PreWarm = pre_warm_start
+
 					s.config.IdleDurationBeforeGC = keep_alive
 					log.Printf("cv mode,cv : %v,preWarm: %v,idle time: %v", s.offlineMeta.Cv, s.config.PreWarm, s.config.IdleDurationBeforeGC)
 				} else {
