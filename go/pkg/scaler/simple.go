@@ -31,14 +31,18 @@ import (
 	"github.com/google/uuid"
 )
 
+// 生产者和消费者的信号
+type Empty struct{}
+
 type Simple struct {
-	config         *config.Config
+	config         config.Config
 	metaData       *model2.Meta
 	platformClient platform_client2.Client
 	mu             sync.Mutex
 	wg             sync.WaitGroup
 	instances      map[string]*model2.Instance
 	idleInstance   *list.List
+	sem            chan Empty // Semaphores for implementing producer-consumer models
 }
 
 func New(metaData *model2.Meta, config *config.Config) Scaler {
@@ -47,13 +51,14 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 		log.Fatalf("client init with error: %s", err.Error())
 	}
 	scheduler := &Simple{
-		config:         config,
+		config:         *config,
 		metaData:       metaData,
 		platformClient: client,
 		mu:             sync.Mutex{},
 		wg:             sync.WaitGroup{},
 		instances:      make(map[string]*model2.Instance),
 		idleInstance:   list.New(),
+		sem:            make(chan Empty, config.MaxConcurrency),
 	}
 	// 新创建一个scaler || key memoryMb
 	log.Printf("New          %s     %d", metaData.Key, metaData.MemoryInMb)
@@ -77,14 +82,47 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 		// 开始运行实例 || key requestId instanceId cost
 		log.Printf("Run          %s     %s %s %d", request.RequestId[:8], request.MetaData.Key, instanceId[:8], time.Since(start).Milliseconds())
 	}()
+
+	// 复用实例
+	select {
+	case <-s.sem: // 消费一个实例
+		s.mu.Lock()
+		if element := s.idleInstance.Front(); element != nil {
+			instance := element.Value.(*model2.Instance)
+			instance.Busy = true
+			s.idleInstance.Remove(element)
+			s.mu.Unlock()
+			log.Printf("Assign, request id: %s, instance %s reused", request.RequestId, instance.Id)
+			instanceId = instance.Id
+			return &pb.AssignReply{
+				Status: pb.Status_Ok,
+				Assigment: &pb.Assignment{
+					RequestId:  request.RequestId,
+					MetaKey:    instance.Meta.Key,
+					InstanceId: instance.Id,
+				},
+				ErrorMessage: nil,
+			}, nil
+		}
+		s.mu.Unlock()
+	default:
+	}
+
+	// 新创建一个实例
+	go s.createInstance(request, instanceId)
+
+	<-s.sem // Block until IdleInstance is not empty, semaphore -1
 	s.mu.Lock()
 	if element := s.idleInstance.Front(); element != nil {
 		instance := element.Value.(*model2.Instance)
+		if instance.Id == instanceId {
+			log.Printf("create new instance %s and use it to complete the request\n", instanceId)
+		} else {
+			log.Printf("Assign, request id: %s, instance %s reused(wait instance)", request.RequestId, instance.Id)
+		}
 		instance.Busy = true
 		s.idleInstance.Remove(element)
 		s.mu.Unlock()
-
-		instanceId = instance.Id
 		return &pb.AssignReply{
 			Status: pb.Status_Ok,
 			Assigment: &pb.Assignment{
@@ -96,20 +134,23 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 		}, nil
 	}
 	s.mu.Unlock()
+	return nil, status.Errorf(codes.Internal, "create new instance %s failed", instanceId)
+}
 
-	//Create new Instance
+func (s *Simple) createInstance(request *pb.AssignRequest, instanceId string) {
 	resourceConfig := model2.SlotResourceConfig{
 		ResourceConfig: pb.ResourceConfig{
 			MemoryInMegabytes: request.MetaData.MemoryInMb,
 		},
 	}
 	// 创建槽位 || key requestId instanceId cost
-	log.Printf("[CreateSlot] %s     %s     %s     %d", request.MetaData.Key, request.RequestId[:8], instanceId[:8], time.Since(start).Milliseconds())
+	log.Printf("[CreateSlot] %s     %s     %s", request.MetaData.Key, request.RequestId[:8], instanceId[:8])
+	ctx := context.Background()
 	slot, err := s.platformClient.CreateSlot(ctx, request.RequestId, &resourceConfig)
 	if err != nil {
 		errorMessage := fmt.Sprintf("create slot failed with: %s", err.Error())
-		log.Printf("create slot failed with: %s", err.Error())
-		return nil, status.Errorf(codes.Internal, errorMessage)
+		log.Print(errorMessage)
+		return
 	}
 
 	meta := &model2.Meta{
@@ -121,34 +162,32 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 	}
 	instance, err := s.platformClient.Init(ctx, request.RequestId, instanceId, slot, meta)
 	// 实例化槽 || key requestId instanceId cost
-	log.Printf("[InitSlot]   %s     %s     %s     %d", request.MetaData.Key, request.RequestId[:8], instanceId[:8], time.Since(start).Milliseconds())
+	log.Printf("[InitSlot]   %s     %s     %s", request.MetaData.Key, request.RequestId[:8], instanceId[:8])
 	if err != nil {
 		errorMessage := fmt.Sprintf("create instance failed with: %s", err.Error())
-		log.Printf("create instance failed with: %s", err.Error())
-		return nil, status.Errorf(codes.Internal, errorMessage)
+		log.Print(errorMessage)
+		return
 	}
 
-	//add new instance
 	s.mu.Lock()
-	instance.Busy = true
-	s.instances[instance.Id] = instance
-	s.mu.Unlock()
 
-	return &pb.AssignReply{
-		Status: pb.Status_Ok,
-		Assigment: &pb.Assignment{
-			RequestId:  request.RequestId,
-			MetaKey:    instance.Meta.Key,
-			InstanceId: instance.Id,
-		},
-		ErrorMessage: nil,
-	}, nil
+	// if !s.flag {
+	// 	s.flag = true
+	// 	s.changeConfig(instance.Slot.CreateDurationInMs+uint64(instance.InitDurationInMs), instance.Meta.MemoryInMb)
+	// }
+	instance.Busy = false
+	s.idleInstance.PushFront(instance)
+	s.instances[instance.Id] = instance
+	s.sem <- Empty{} // produce a semaphore
+	s.mu.Unlock()
 }
 
 func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleReply, error) {
+	// 1. check request
 	if request.Assigment == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "assignment is nil")
 	}
+	// 2. get instanceId from request assignment
 	reply := &pb.IdleReply{
 		Status:       pb.Status_Ok,
 		ErrorMessage: nil,
@@ -156,8 +195,9 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 
 	instanceId := request.Assigment.InstanceId
 	// 释放实例 || key requestId instanceId
-	log.Printf("[Idle]        %s     %s     %s", request.Assigment.MetaKey, request.Assigment.RequestId[:8], instanceId[:8])
+	log.Printf("[Idle]       %s     %s     %s", request.Assigment.MetaKey, request.Assigment.RequestId[:8], instanceId[:8])
 
+	// 3. check instance whether need destroy
 	needDestroy := false
 	slotId := ""
 	if request.Result != nil && request.Result.NeedDestroy != nil && *request.Result.NeedDestroy {
@@ -169,27 +209,33 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 		}
 	}()
 
+	// 4. idle instance
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if instance := s.instances[instanceId]; instance != nil {
 		slotId = instance.Slot.Id
 		instance.LastIdleTime = time.Now()
-		// simulator 强制要求释放
+		// 4.1 if need destroy, then delete slot at defer function
 		if needDestroy {
 			log.Printf("request id %s, instance %s need be destroy", request.Assigment.RequestId, instanceId)
 			return reply, nil
 		}
 
-		// 实例之间已经被释放了
+		// 4.2 if not need destroy, the instance has been freed
 		if !instance.Busy {
 			log.Printf("request id %s, instance %s already freed", request.Assigment.RequestId, instanceId)
 			return reply, nil
 		}
+
+		// 4.3 if not need destroy, add it to idle list
 		instance.Busy = false
 		s.idleInstance.PushFront(instance)
+		s.sem <- Empty{} // Idle list gets longer, semaphore + 1
 	} else {
 		return nil, status.Errorf(codes.NotFound, fmt.Sprintf("request id %s, instance %s not found", request.Assigment.RequestId, instanceId))
 	}
+
+	// 5. return reply
 	return &pb.IdleReply{
 		Status:       pb.Status_Ok,
 		ErrorMessage: nil,
@@ -216,6 +262,7 @@ func (s *Simple) gcLoop() {
 				idleDuration := time.Since(instance.LastIdleTime)
 				if idleDuration > s.config.IdleDurationBeforeGC {
 					// need GC
+					<-s.sem // Consuming a semaphore
 					s.idleInstance.Remove(element)
 					delete(s.instances, instance.Id)
 					s.mu.Unlock()

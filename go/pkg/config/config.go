@@ -13,16 +13,21 @@ limitations under the License.
 
 package config
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 type Config struct {
 	ClientAddr           string
 	GcInterval           time.Duration
 	IdleDurationBeforeGC time.Duration
+	MaxConcurrency       int
 }
 
 var DefaultConfig = Config{
 	ClientAddr:           "127.0.0.1:50051",
 	GcInterval:           10 * time.Second,
-	IdleDurationBeforeGC: 5 * time.Minute,
+	IdleDurationBeforeGC: 30 * time.Second, // original is 5 * time.Minute
+	MaxConcurrency:       math.MaxInt32,
 }
