@@ -35,7 +35,7 @@ import (
 type Empty struct{}
 
 type Simple struct {
-	config                   *config.Config              // config
+	config                   config.Config               // config
 	metaData                 *model2.Meta                // meta data
 	platformClient           platform_client2.Client     // interface to call simulator
 	mu                       sync.Mutex                  // lock
@@ -53,10 +53,9 @@ func New(metaData *model2.Meta, config *config.Config, offline map[string]*model
 	if err != nil {
 		log.Fatalf("client init with error: %s", err.Error())
 	}
-	myconfig := *config
 	// new scaler
 	s := &Simple{
-		config:                   &myconfig,                               // default config
+		config:                   *config,                                 // default config
 		metaData:                 metaData,                                // request metadata
 		platformClient:           client,                                  // platform client
 		mu:                       sync.Mutex{},                            // lock
@@ -95,10 +94,10 @@ func New(metaData *model2.Meta, config *config.Config, offline map[string]*model
 			keep_alive_min := time.Duration(s.offlineMeta.P25) * time.Millisecond
 			keep_alive_max := time.Duration(s.offlineMeta.P75) * time.Millisecond
 			keep_alive := keep_alive_max - keep_alive_min + time.Duration(1+rand.Intn(2))*time.Second
-			// 75% < ( init + 100 ) * 2, idle = 75% * 2,prewarm =0
+			// 75% < ( init + 100 ) * 2, idle = rount(P99),prewarm =0
 			if keep_alive_max < (100*time.Millisecond+time.Duration(s.offlineMeta.InitDurationInMs)*time.Millisecond)*2 {
-				//TODO 尝试改成0.99分位数
-				s.config.IdleDurationBeforeGC = keep_alive_max * 2
+				//用0.99分位数 解决 11111______111111____11111的问题
+				s.config.IdleDurationBeforeGC = time.Duration(s.offlineMeta.P99) * time.Millisecond
 				s.config.PreWarm = 0
 				log.Printf("Idle time less than init time,metaKey: %s,gc time: %s", s.metaData.Key, s.config.IdleDurationBeforeGC)
 			} else {

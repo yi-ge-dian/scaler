@@ -45,6 +45,7 @@ type IdleTimeStats struct {
 	P25              float64 `csv:"25%"`
 	P50              float64 `csv:"50%"`
 	P75              float64 `csv:"75%"`
+	P99              float64 `csv:"99%"`
 	Cv               float64 `csv:"cv"`
 	DurationsInMs    int     `csv:"durationsInMs"`
 }
@@ -58,6 +59,7 @@ type OfflineMeta struct {
 	P25                     float64
 	P50                     float64
 	P75                     float64
+	P99                     float64
 }
 
 // NewOfflineMeta returns a new offline meta map.
@@ -101,6 +103,7 @@ func NewOfflineMeta() map[string]*OfflineMeta {
 				P25:               u.P25,
 				P50:               u.P50,
 				P75:               u.P75,
+				P99:               u.P99,
 			}
 		}
 	}
