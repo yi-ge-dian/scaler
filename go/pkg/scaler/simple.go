@@ -260,7 +260,7 @@ func (s *Simple) gcLoop() {
 			if element := s.idleInstance.Back(); element != nil {
 				instance := element.Value.(*model2.Instance)
 				idleDuration := time.Since(instance.LastIdleTime)
-				if idleDuration > s.config.IdleDurationBeforeGC {
+				if idleDuration > s.config.IdleDurationBeforeGC || s.idleInstance.Len() > 10 || (s.metaData.MemoryInMb >= 2048 && s.idleInstance.Len() > 1) {
 					// need GC
 					<-s.sem // Consuming a semaphore
 					s.idleInstance.Remove(element)
