@@ -23,11 +23,26 @@ type Config struct {
 	GcInterval           time.Duration
 	IdleDurationBeforeGC time.Duration
 	MaxConcurrency       int
+	Feature              map[string]int
 }
 
 var DefaultConfig = Config{
 	ClientAddr:           "127.0.0.1:50051",
-	GcInterval:           10 * time.Second,
-	IdleDurationBeforeGC: 30 * time.Second, // original is 5 * time.Minute
+	GcInterval:           3 * time.Second,
+	IdleDurationBeforeGC: 5 * time.Second, // original is 5 * time.Minute
 	MaxConcurrency:       math.MaxInt32,
+	Feature: map[string]int{
+		"nodes1":                      1,
+		"roles1":                      1,
+		"rolebindings1":               1,
+		"certificatesigningrequests1": 1,
+		"binding1":                    1,
+		"csinodes1":                   1,
+		"nodes2":                      2,
+		"roles2":                      2,
+		"rolebindings2":               2,
+		"certificatesigningrequests2": 2,
+		"binding2":                    2,
+		"csinodes2":                   2,
+	},
 }

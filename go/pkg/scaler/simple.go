@@ -43,6 +43,7 @@ type Simple struct {
 	instances      map[string]*model2.Instance
 	idleInstance   *list.List
 	sem            chan Empty // Semaphores for implementing producer-consumer models
+	// recentInstanceList *list.List
 }
 
 func New(metaData *model2.Meta, config *config.Config) Scaler {
@@ -59,7 +60,19 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 		instances:      make(map[string]*model2.Instance),
 		idleInstance:   list.New(),
 		sem:            make(chan Empty, config.MaxConcurrency),
+		// recentInstanceList: list.New(),
 	}
+
+	if fromDSNo, ok := config.Feature[metaData.Key]; ok {
+		if fromDSNo == 1 {
+			scheduler.config.GcInterval = 1 * time.Second
+			scheduler.config.IdleDurationBeforeGC = 1 * time.Second
+		} else {
+			scheduler.config.GcInterval = 3 * time.Second
+			scheduler.config.IdleDurationBeforeGC = 5 * time.Second
+		}
+	}
+
 	// 新创建一个scaler || key memoryMb
 	log.Printf("New          %s     %d", metaData.Key, metaData.MemoryInMb)
 	scheduler.wg.Add(1)
@@ -117,6 +130,30 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 		instance := element.Value.(*model2.Instance)
 		if instance.Id == instanceId {
 			log.Printf("create new instance %s and use it to complete the request\n", instanceId)
+			// if s.recentInstanceList.Len() >= 5 {
+			// 	s.recentInstanceList.Remove(s.recentInstanceList.Front())
+			// 	recentInstace := &model2.RecentInstance{
+			// 		StartTime:  time.Now(),
+			// 		InstanceId: instance.Id,
+			// 	}
+			// 	s.recentInstanceList.PushBack(recentInstace)
+			// 	front := s.idleInstance.Front()
+			// 	back := s.idleInstance.Back()
+			// 	duration := back.Value.(*model2.RecentInstance).StartTime.Sub(front.Value.(*model2.RecentInstance).StartTime).Milliseconds()
+			// 	if duration < 20 {
+			// 		// 立即创建3个实例
+			// 		for i := 0; i < 3; i++ {
+			// 			go s.createInstance(request, uuid.New().String())
+			// 		}
+			// 	}
+			// } else {
+			// 	recentInstace := &model2.RecentInstance{
+			// 		StartTime:  time.Now(),
+			// 		InstanceId: instance.Id,
+			// 	}
+			// 	s.recentInstanceList.PushBack(recentInstace)
+			// }
+
 		} else {
 			log.Printf("Assign, request id: %s, instance %s reused(wait instance)", request.RequestId, instance.Id)
 		}
@@ -207,6 +244,20 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 		if needDestroy {
 			s.deleteSlot(ctx, request.Assigment.RequestId, slotId, instanceId, request.Assigment.MetaKey, "bad instance")
 		}
+		// s.mu.Lock()
+		// if needDestroy {
+		// 	for e := s.recentInstanceList.Front(); e != nil; e = e.Next() {
+		// 		recentInstance := e.Value.(*model2.RecentInstance)
+		// 		if recentInstance.InstanceId == instanceId {
+		// 			s.recentInstanceList.Remove(e)
+		// 			break
+		// 		}
+		// 	}
+		// 	s.mu.Unlock()
+		// 	s.deleteSlot(ctx, request.Assigment.RequestId, slotId, instanceId, request.Assigment.MetaKey, "bad instance")
+		// } else {
+		// 	s.mu.Unlock()
+		// }
 	}()
 
 	// 4. idle instance
@@ -274,6 +325,15 @@ func (s *Simple) gcLoop() {
 						ctx := context.Background()
 						ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 						defer cancel()
+						// s.mu.Lock()
+						// for e := s.recentInstanceList.Front(); e != nil; e = e.Next() {
+						// 	recentInstance := e.Value.(*model2.RecentInstance)
+						// 	if recentInstance.InstanceId == instance.Id {
+						// 		s.recentInstanceList.Remove(e)
+						// 		break
+						// 	}
+						// }
+						// s.mu.Lock()
 						s.deleteSlot(ctx, uuid.NewString(), instance.Slot.Id, instance.Id, instance.Meta.Key, reason)
 					}()
 

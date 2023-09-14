@@ -32,3 +32,8 @@ type Instance struct {
 	Busy             bool
 	LastIdleTime     time.Time
 }
+
+type RecentInstance struct {
+	StartTime  time.Time
+	InstanceId string
+}
