@@ -260,6 +260,25 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 		// }
 	}()
 
+	if s.metaData.Key == "nodes1" {
+		s.config.IdleDurationBeforeGC = 200 * time.Millisecond
+
+		go func() {
+			timer := time.NewTimer(26000 * time.Millisecond)
+			<-timer.C
+			assignRequest := &pb.AssignRequest{
+				RequestId: uuid.NewString(),
+				MetaData: &pb.Meta{
+					Key:           s.metaData.Key,
+					Runtime:       s.metaData.Runtime,
+					TimeoutInSecs: s.metaData.TimeoutInSecs,
+					MemoryInMb:    s.metaData.MemoryInMb,
+				},
+			}
+			s.createInstance(assignRequest, uuid.NewString())
+		}()
+		s.deleteSlot(context.Background(), request.Assigment.RequestId, slotId, instanceId, request.Assigment.MetaKey, "cv delete")
+	}
 	// 4. idle instance
 	s.mu.Lock()
 	defer s.mu.Unlock()
