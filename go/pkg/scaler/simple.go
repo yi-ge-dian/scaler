@@ -43,6 +43,7 @@ type Simple struct {
 	instances      map[string]*model2.Instance
 	idleInstance   *list.List
 	sem            chan Empty // Semaphores for implementing producer-consumer models
+	conNum         int
 	// recentInstanceList *list.List
 }
 
@@ -60,11 +61,12 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 		instances:      make(map[string]*model2.Instance),
 		idleInstance:   list.New(),
 		sem:            make(chan Empty, config.MaxConcurrency),
+		conNum:         0,
 		// recentInstanceList: list.New(),
 	}
 
-	if fromDSNo, ok := config.Feature[metaData.Key]; ok {
-		if fromDSNo == 1 {
+	if trait, ok := config.Feature[metaData.Key]; ok {
+		if trait.DataSetNo == 1 {
 			scheduler.config.GcInterval = 1 * time.Second
 			scheduler.config.IdleDurationBeforeGC = 1 * time.Second
 		} else {
@@ -119,6 +121,39 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 		}
 		s.mu.Unlock()
 	default:
+		s.mu.Lock()
+		if trait, ok := s.config.Feature[s.metaData.Key]; ok {
+			if (trait.ExecDurationInMs < trait.InitDurationInMs+100 || trait.ExecDurationInMs < 400) &&
+				s.conNum < 3 &&
+				s.conNum < len(s.instances) {
+				s.conNum++
+				retryNum := int((float32(trait.InitDurationInMs))/10) + 10
+				for i := 0; i < retryNum; i++ {
+					s.mu.Unlock()
+					time.Sleep(10 * time.Millisecond)
+					s.mu.Lock()
+					if element := s.idleInstance.Front(); element != nil {
+						s.conNum -= 1
+						instance := element.Value.(*model2.Instance)
+						instance.Busy = true
+						s.idleInstance.Remove(element)
+						s.mu.Unlock()
+						instanceId = instance.Id
+						return &pb.AssignReply{
+							Status: pb.Status_Ok,
+							Assigment: &pb.Assignment{
+								RequestId:  request.RequestId,
+								MetaKey:    instance.Meta.Key,
+								InstanceId: instance.Id,
+							},
+							ErrorMessage: nil,
+						}, nil
+					}
+				}
+				s.conNum--
+			}
+		}
+		s.mu.Unlock()
 	}
 
 	// 新创建一个实例
