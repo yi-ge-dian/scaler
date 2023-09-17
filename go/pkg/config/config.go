@@ -11,38 +11,117 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package config
+package config2
 
 import (
 	"math"
 	"time"
 )
 
+type DataSetInfo struct {
+	ExecutionDurationInMs float32 // 执行时间
+	InitDurationInMs      int64   // 初始化时间
+	MemoryInMb            int64   // 内存
+}
+
+// certificatesigningrequests1    29.958949
+// csinodes1                      30.000000
+// nodes1                         56.263234
+// rolebindings1                  28.868354
+// roles1                         29.578194
+// {"key": "nodes1", "runtime": "go", "timeoutInSecs": 627, "memoryInMb": 512, "initDurationInMs": 49}
+// {"key": "roles1", "runtime": "go", "timeoutInSecs": 129, "memoryInMb": 256, "initDurationInMs": 56}
+// {"key": "rolebindings1", "runtime": "go", "timeoutInSecs": 491, "memoryInMb": 256, "initDurationInMs": 13}
+// {"key": "certificatesigningrequests1", "runtime": "go", "timeoutInSecs": 541, "memoryInMb": 256, "initDurationInMs": 20}
+// {"key": "binding1", "runtime": "go", "timeoutInSecs": 885, "memoryInMb": 256, "initDurationInMs": 48}
+// {"key": "csinodes1", "runtime": "go", "timeoutInSecs": 366, "memoryInMb": 512, "initDurationInMs": 28}
+var InfoMap1 = map[string]*DataSetInfo{
+	"certificatesigningrequests1": {
+		ExecutionDurationInMs: 29.958949,
+		InitDurationInMs:      20,
+		MemoryInMb:            256,
+	},
+	"csinodes1": {
+		ExecutionDurationInMs: 30.000000,
+		InitDurationInMs:      28,
+		MemoryInMb:            512,
+	},
+	"nodes1": {
+		ExecutionDurationInMs: 56.263234,
+		InitDurationInMs:      49,
+		MemoryInMb:            512,
+	},
+	"rolebindings1": {
+		ExecutionDurationInMs: 28.868354,
+		InitDurationInMs:      13,
+		MemoryInMb:            256,
+	},
+	"roles1": {
+		ExecutionDurationInMs: 29.578194,
+		InitDurationInMs:      56,
+		MemoryInMb:            256,
+	},
+	"binding1": {
+		ExecutionDurationInMs: 0.00,
+		InitDurationInMs:      48,
+		MemoryInMb:            256,
+	},
+}
+
+// binding2                       16.928627
+// certificatesigningrequests2    19.727118
+// nodes2                         36.614693
+// rolebindings2                  18.454575
+// roles2                         19.762240
+// {"key": "nodes2", "runtime": "go", "timeoutInSecs": 627, "memoryInMb": 512, "initDurationInMs": 49}
+// {"key": "roles2", "runtime": "go", "timeoutInSecs": 129, "memoryInMb": 256, "initDurationInMs": 56}
+// {"key": "rolebindings2", "runtime": "go", "timeoutInSecs": 491, "memoryInMb": 256, "initDurationInMs": 13}
+// {"key": "certificatesigningrequests2", "runtime": "go", "timeoutInSecs": 541, "memoryInMb": 256, "initDurationInMs": 20}
+// {"key": "binding2", "runtime": "go", "timeoutInSecs": 885, "memoryInMb": 256, "initDurationInMs": 48}
+// {"key": "csinodes2", "runtime": "go", "timeoutInSecs": 366, "memoryInMb": 512, "initDurationInMs": 28}
+var InfoMap2 = map[string]*DataSetInfo{
+	"bingding2": {
+		ExecutionDurationInMs: 16.928627,
+		InitDurationInMs:      48,
+		MemoryInMb:            256,
+	},
+	"certificatesigningrequests2": {
+		ExecutionDurationInMs: 19.727118,
+		InitDurationInMs:      20,
+		MemoryInMb:            256,
+	},
+	"nodes2": {
+		ExecutionDurationInMs: 36.614693,
+		InitDurationInMs:      49,
+		MemoryInMb:            512,
+	},
+	"rolebindings2": {
+		ExecutionDurationInMs: 18.454575,
+		InitDurationInMs:      13,
+		MemoryInMb:            256,
+	},
+	"roles2": {
+		ExecutionDurationInMs: 19.762240,
+		InitDurationInMs:      56,
+		MemoryInMb:            256,
+	},
+	"csinodes2": {
+		ExecutionDurationInMs: 0.00,
+		InitDurationInMs:      28,
+		MemoryInMb:            512,
+	},
+}
+
 type Config struct {
 	ClientAddr           string
 	GcInterval           time.Duration
 	IdleDurationBeforeGC time.Duration
 	MaxConcurrency       int
-	Feature              map[string]int
 }
 
 var DefaultConfig = Config{
 	ClientAddr:           "127.0.0.1:50051",
-	GcInterval:           3 * time.Second,
+	GcInterval:           1 * time.Second,
 	IdleDurationBeforeGC: 5 * time.Second, // original is 5 * time.Minute
 	MaxConcurrency:       math.MaxInt32,
-	Feature: map[string]int{
-		"nodes1":                      1,
-		"roles1":                      1,
-		"rolebindings1":               1,
-		"certificatesigningrequests1": 1,
-		"binding1":                    1,
-		"csinodes1":                   1,
-		"nodes2":                      2,
-		"roles2":                      2,
-		"rolebindings2":               2,
-		"certificatesigningrequests2": 2,
-		"binding2":                    2,
-		"csinodes2":                   2,
-	},
 }

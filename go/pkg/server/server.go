@@ -17,7 +17,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/AliyunContainerService/scaler/go/pkg/config"
+	config2 "github.com/AliyunContainerService/scaler/go/pkg/config"
 	"github.com/AliyunContainerService/scaler/go/pkg/manager"
 	"github.com/AliyunContainerService/scaler/go/pkg/model"
 
@@ -34,7 +34,7 @@ type Server struct {
 
 func New() *Server {
 	return &Server{
-		mgr: manager.New(&config.DefaultConfig),
+		mgr: manager.New(&config2.DefaultConfig),
 	}
 }
 

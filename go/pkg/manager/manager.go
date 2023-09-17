@@ -18,7 +18,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/AliyunContainerService/scaler/go/pkg/config"
+	config2 "github.com/AliyunContainerService/scaler/go/pkg/config"
 	"github.com/AliyunContainerService/scaler/go/pkg/model"
 	scaler2 "github.com/AliyunContainerService/scaler/go/pkg/scaler"
 )
@@ -26,10 +26,10 @@ import (
 type Manager struct {
 	rw         sync.RWMutex
 	schedulers map[string]scaler2.Scaler
-	config     *config.Config
+	config     *config2.Config
 }
 
-func New(config *config.Config) *Manager {
+func New(config *config2.Config) *Manager {
 	return &Manager{
 		rw:         sync.RWMutex{},
 		schedulers: make(map[string]scaler2.Scaler),
