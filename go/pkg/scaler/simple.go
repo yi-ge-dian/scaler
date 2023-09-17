@@ -34,61 +34,47 @@ import (
 type Empty struct{}
 
 type Simple struct {
-	config         config2.Config
-	metaData       *model2.Meta
-	platformClient platform_client2.Client
-	mu             sync.Mutex
-	wg             sync.WaitGroup
-	instances      map[string]*model2.Instance
-	idleInstance   *list.List
-	sem            chan Empty // Semaphores for implementing producer-consumer models
-	DataSetInfo    *config2.DataSetInfo
-	// flag           bool
+	config             config2.Config
+	metaData           *model2.Meta
+	platformClient     platform_client2.Client
+	mu                 sync.Mutex
+	wg                 sync.WaitGroup
+	instances          map[string]*model2.Instance
+	idleInstance       *list.List
+	sem                chan Empty // Semaphores for implementing producer-consumer models
+	dataSetInfo        *config2.DataSetInfo
 	// recentInstanceList *list.List
+	// flag           bool
 }
 
 func New(metaData *model2.Meta, config *config2.Config) Scaler {
 	client, _ := platform_client2.New(config.ClientAddr)
 	scheduler := &Simple{
-		config:         *config,
-		metaData:       metaData,
-		platformClient: client,
-		mu:             sync.Mutex{},
-		wg:             sync.WaitGroup{},
-		instances:      make(map[string]*model2.Instance),
-		idleInstance:   list.New(),
-		sem:            make(chan Empty, config.MaxConcurrency),
-		DataSetInfo:    nil,
-		// flag:           false,
+		config:             *config,
+		metaData:           metaData,
+		platformClient:     client,
+		mu:                 sync.Mutex{},
+		wg:                 sync.WaitGroup{},
+		instances:          make(map[string]*model2.Instance),
+		idleInstance:       list.New(),
+		sem:                make(chan Empty, config.MaxConcurrency),
+		dataSetInfo:        nil,
 		// recentInstanceList: list.New(),
+		// flag:           false,
 	}
 
-	// 如果数据集1中有这个key，则使用数据集1中的配置
-	if dataSetInfo, ok := config2.InfoMap1[metaData.Key]; ok {
-		scheduler.DataSetInfo = dataSetInfo
-		scheduler.config.GcInterval = 1 * time.Second
-		scheduler.config.IdleDurationBeforeGC = 1 * time.Second
-		scheduler.wg.Add(1)
-		go func() {
-			defer scheduler.wg.Done()
-			scheduler.gcLoop()
-		}()
-
-		return scheduler
-	}
-
-	// 如果数据集2中有这个key，则使用数据集1中的配置
-	if dataSetInfo, ok := config2.InfoMap2[metaData.Key]; ok {
-		scheduler.DataSetInfo = dataSetInfo
-		scheduler.config.GcInterval = 10 * time.Second
-		scheduler.config.IdleDurationBeforeGC = 30 * time.Second
-		scheduler.wg.Add(1)
-		go func() {
-			defer scheduler.wg.Done()
-			scheduler.gcLoop()
-		}()
-
-		return scheduler
+	if dataSetInfo, ok := config2.InfoMap[metaData.Key]; ok {
+		scheduler.dataSetInfo = dataSetInfo
+		switch dataSetInfo.No {
+		case 1:
+			scheduler.config.GcInterval = 1 * time.Second
+			scheduler.config.IdleDurationBeforeGC = 1 * time.Second
+			// todo: 调节数据集2的参数
+		case 2:
+			scheduler.config.GcInterval = 10 * time.Second
+			scheduler.config.IdleDurationBeforeGC = 40 * time.Second
+		default:
+		}
 	}
 
 	scheduler.wg.Add(1)
@@ -134,34 +120,31 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 	s.mu.Lock()
 	if element := s.idleInstance.Front(); element != nil {
 		instance := element.Value.(*model2.Instance)
+		// 实例是新创建的
 		// if instance.Id == instanceId {
-		// 	log.Printf("create new instance %s and use it to complete the request\n", instanceId)
-		// if s.recentInstanceList.Len() >= 5 {
-		// 	s.recentInstanceList.Remove(s.recentInstanceList.Front())
-		// 	recentInstace := &model2.RecentInstance{
-		// 		StartTime:  time.Now(),
-		// 		InstanceId: instance.Id,
-		// 	}
-		// 	s.recentInstanceList.PushBack(recentInstace)
-		// 	front := s.idleInstance.Front()
-		// 	back := s.idleInstance.Back()
-		// 	duration := back.Value.(*model2.RecentInstance).StartTime.Sub(front.Value.(*model2.RecentInstance).StartTime).Milliseconds()
-		// 	if duration < 20 {
-		// 		// 立即创建3个实例
-		// 		for i := 0; i < 3; i++ {
-		// 			go s.createInstance(request, uuid.New().String())
+		// 	if s.recentInstanceList.Len() >= 5 {
+		// 		s.recentInstanceList.Remove(s.recentInstanceList.Front())
+		// 		recentInstace := &model2.RecentInstance{
+		// 			StartTime:  time.Now(),
+		// 			InstanceId: instance.Id,
 		// 		}
+		// 		s.recentInstanceList.PushBack(recentInstace)
+		// 		front := s.idleInstance.Front()
+		// 		back := s.idleInstance.Back()
+		// 		duration := back.Value.(*model2.RecentInstance).StartTime.Sub(front.Value.(*model2.RecentInstance).StartTime).Milliseconds()
+		// 		if duration < 3000 {
+		// 			// 立即创建 3 个实例
+		// 			for i := 0; i < 3; i++ {
+		// 				go s.createInstance(request, uuid.New().String())
+		// 			}
+		// 		}
+		// 	} else {
+		// 		recentInstace := &model2.RecentInstance{
+		// 			StartTime:  time.Now(),
+		// 			InstanceId: instance.Id,
+		// 		}
+		// 		s.recentInstanceList.PushBack(recentInstace)
 		// 	}
-		// } else {
-		// 	recentInstace := &model2.RecentInstance{
-		// 		StartTime:  time.Now(),
-		// 		InstanceId: instance.Id,
-		// 	}
-		// 	s.recentInstanceList.PushBack(recentInstace)
-		// }
-
-		// } else {
-		// 	log.Printf("Assign, request id: %s, instance %s reused(wait instance)", request.RequestId, instance.Id)
 		// }
 		instance.Busy = true
 		s.idleInstance.Remove(element)
@@ -300,7 +283,7 @@ func (s *Simple) gcLoop() {
 			if element := s.idleInstance.Back(); element != nil {
 				instance := element.Value.(*model2.Instance)
 				idleDuration := time.Since(instance.LastIdleTime)
-				if idleDuration > s.config.IdleDurationBeforeGC || s.idleInstance.Len() > 10 || (s.metaData.MemoryInMb >= 2048 && s.idleInstance.Len() > 1) {
+				if idleDuration > s.config.IdleDurationBeforeGC || s.idleInstance.Len() > 5 || (s.metaData.MemoryInMb >= 2048 && s.idleInstance.Len() > 1) {
 					// need GC
 					<-s.sem // Consuming a semaphore
 					s.idleInstance.Remove(element)
@@ -320,7 +303,7 @@ func (s *Simple) gcLoop() {
 						// 		break
 						// 	}
 						// }
-						// s.mu.Lock()
+						// s.mu.Unlock()
 						s.deleteSlot(ctx, uuid.NewString(), instance.Slot.Id, instance.Id, instance.Meta.Key, reason)
 					}()
 

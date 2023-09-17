@@ -19,6 +19,7 @@ import (
 )
 
 type DataSetInfo struct {
+	No                    int     // 序号
 	ExecutionDurationInMs float32 // 执行时间
 	InitDurationInMs      int64   // 初始化时间
 	MemoryInMb            int64   // 内存
@@ -35,38 +36,6 @@ type DataSetInfo struct {
 // {"key": "certificatesigningrequests1", "runtime": "go", "timeoutInSecs": 541, "memoryInMb": 256, "initDurationInMs": 20}
 // {"key": "binding1", "runtime": "go", "timeoutInSecs": 885, "memoryInMb": 256, "initDurationInMs": 48}
 // {"key": "csinodes1", "runtime": "go", "timeoutInSecs": 366, "memoryInMb": 512, "initDurationInMs": 28}
-var InfoMap1 = map[string]*DataSetInfo{
-	"certificatesigningrequests1": {
-		ExecutionDurationInMs: 29.958949,
-		InitDurationInMs:      20,
-		MemoryInMb:            256,
-	},
-	"csinodes1": {
-		ExecutionDurationInMs: 30.000000,
-		InitDurationInMs:      28,
-		MemoryInMb:            512,
-	},
-	"nodes1": {
-		ExecutionDurationInMs: 56.263234,
-		InitDurationInMs:      49,
-		MemoryInMb:            512,
-	},
-	"rolebindings1": {
-		ExecutionDurationInMs: 28.868354,
-		InitDurationInMs:      13,
-		MemoryInMb:            256,
-	},
-	"roles1": {
-		ExecutionDurationInMs: 29.578194,
-		InitDurationInMs:      56,
-		MemoryInMb:            256,
-	},
-	"binding1": {
-		ExecutionDurationInMs: 0.00,
-		InitDurationInMs:      48,
-		MemoryInMb:            256,
-	},
-}
 
 // binding2                       16.928627
 // certificatesigningrequests2    19.727118
@@ -79,33 +48,75 @@ var InfoMap1 = map[string]*DataSetInfo{
 // {"key": "certificatesigningrequests2", "runtime": "go", "timeoutInSecs": 541, "memoryInMb": 256, "initDurationInMs": 20}
 // {"key": "binding2", "runtime": "go", "timeoutInSecs": 885, "memoryInMb": 256, "initDurationInMs": 48}
 // {"key": "csinodes2", "runtime": "go", "timeoutInSecs": 366, "memoryInMb": 512, "initDurationInMs": 28}
-var InfoMap2 = map[string]*DataSetInfo{
+var InfoMap = map[string]*DataSetInfo{
+	"certificatesigningrequests1": {
+		No:                    1,
+		ExecutionDurationInMs: 29.958949,
+		InitDurationInMs:      20,
+		MemoryInMb:            256,
+	},
+	"csinodes1": {
+		No:                    1,
+		ExecutionDurationInMs: 30.000000,
+		InitDurationInMs:      28,
+		MemoryInMb:            512,
+	},
+	"nodes1": {
+		No:                    1,
+		ExecutionDurationInMs: 56.263234,
+		InitDurationInMs:      49,
+		MemoryInMb:            512,
+	},
+	"rolebindings1": {
+		No:                    1,
+		ExecutionDurationInMs: 28.868354,
+		InitDurationInMs:      13,
+		MemoryInMb:            256,
+	},
+	"roles1": {
+		No:                    1,
+		ExecutionDurationInMs: 29.578194,
+		InitDurationInMs:      56,
+		MemoryInMb:            256,
+	},
+	"binding1": {
+		No:                    1,
+		ExecutionDurationInMs: 0.00,
+		InitDurationInMs:      48,
+		MemoryInMb:            256,
+	},
 	"bingding2": {
+		No:                    2,
 		ExecutionDurationInMs: 16.928627,
 		InitDurationInMs:      48,
 		MemoryInMb:            256,
 	},
 	"certificatesigningrequests2": {
+		No:                    2,
 		ExecutionDurationInMs: 19.727118,
 		InitDurationInMs:      20,
 		MemoryInMb:            256,
 	},
 	"nodes2": {
+		No:                    2,
 		ExecutionDurationInMs: 36.614693,
 		InitDurationInMs:      49,
 		MemoryInMb:            512,
 	},
 	"rolebindings2": {
+		No:                    2,
 		ExecutionDurationInMs: 18.454575,
 		InitDurationInMs:      13,
 		MemoryInMb:            256,
 	},
 	"roles2": {
+		No:                    2,
 		ExecutionDurationInMs: 19.762240,
 		InitDurationInMs:      56,
 		MemoryInMb:            256,
 	},
 	"csinodes2": {
+		No:                    2,
 		ExecutionDurationInMs: 0.00,
 		InitDurationInMs:      28,
 		MemoryInMb:            512,
