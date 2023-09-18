@@ -17,6 +17,7 @@ import (
 	"container/list"
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -34,15 +35,15 @@ import (
 type Empty struct{}
 
 type Simple struct {
-	config             config2.Config
-	metaData           *model2.Meta
-	platformClient     platform_client2.Client
-	mu                 sync.Mutex
-	wg                 sync.WaitGroup
-	instances          map[string]*model2.Instance
-	idleInstance       *list.List
-	sem                chan Empty // Semaphores for implementing producer-consumer models
-	dataSetInfo        *config2.DataSetInfo
+	config         config2.Config
+	metaData       *model2.Meta
+	platformClient platform_client2.Client
+	mu             sync.Mutex
+	wg             sync.WaitGroup
+	instances      map[string]*model2.Instance
+	idleInstance   *list.List
+	sem            chan Empty // Semaphores for implementing producer-consumer models
+	dataSetInfo    *config2.DataSetInfo
 	// recentInstanceList *list.List
 	// flag           bool
 }
@@ -50,15 +51,15 @@ type Simple struct {
 func New(metaData *model2.Meta, config *config2.Config) Scaler {
 	client, _ := platform_client2.New(config.ClientAddr)
 	scheduler := &Simple{
-		config:             *config,
-		metaData:           metaData,
-		platformClient:     client,
-		mu:                 sync.Mutex{},
-		wg:                 sync.WaitGroup{},
-		instances:          make(map[string]*model2.Instance),
-		idleInstance:       list.New(),
-		sem:                make(chan Empty, config.MaxConcurrency),
-		dataSetInfo:        nil,
+		config:         *config,
+		metaData:       metaData,
+		platformClient: client,
+		mu:             sync.Mutex{},
+		wg:             sync.WaitGroup{},
+		instances:      make(map[string]*model2.Instance),
+		idleInstance:   list.New(),
+		sem:            make(chan Empty, math.MaxInt32),
+		dataSetInfo:    nil,
 		// recentInstanceList: list.New(),
 		// flag:           false,
 	}
@@ -69,10 +70,10 @@ func New(metaData *model2.Meta, config *config2.Config) Scaler {
 		case 1:
 			scheduler.config.GcInterval = 1 * time.Second
 			scheduler.config.IdleDurationBeforeGC = 1 * time.Second
-			// todo: 调节数据集2的参数
+			// todo : 调节数据集2的参数
 		case 2:
 			scheduler.config.GcInterval = 10 * time.Second
-			scheduler.config.IdleDurationBeforeGC = 40 * time.Second
+			scheduler.config.IdleDurationBeforeGC = 30 * time.Second
 		default:
 		}
 	}
@@ -283,7 +284,14 @@ func (s *Simple) gcLoop() {
 			if element := s.idleInstance.Back(); element != nil {
 				instance := element.Value.(*model2.Instance)
 				idleDuration := time.Since(instance.LastIdleTime)
-				if idleDuration > s.config.IdleDurationBeforeGC || s.idleInstance.Len() > 5 || (s.metaData.MemoryInMb >= 2048 && s.idleInstance.Len() > 1) {
+				// todo : 内存和空闲链表一起调节
+				// status := s.Stats()
+				// runningNum := status.TotalInstance - status.TotalIdleInstance
+				// idleNum := status.TotalIdleInstance
+				if idleDuration > s.config.IdleDurationBeforeGC ||
+					s.idleInstance.Len() > 8 ||
+					// runningNum > idleNum ||
+					(s.metaData.MemoryInMb >= 2048 && s.idleInstance.Len() > 1) {
 					// need GC
 					<-s.sem // Consuming a semaphore
 					s.idleInstance.Remove(element)
@@ -317,8 +325,6 @@ func (s *Simple) gcLoop() {
 }
 
 func (s *Simple) Stats() Stats {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return Stats{
 		TotalInstance:     len(s.instances),
 		TotalIdleInstance: s.idleInstance.Len(),

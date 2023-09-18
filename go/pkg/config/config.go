@@ -14,7 +14,6 @@ limitations under the License.
 package config2
 
 import (
-	"math"
 	"time"
 )
 
@@ -127,12 +126,11 @@ type Config struct {
 	ClientAddr           string
 	GcInterval           time.Duration
 	IdleDurationBeforeGC time.Duration
-	MaxConcurrency       int
 }
 
+// todo : 调节数据集3的参数
 var DefaultConfig = Config{
 	ClientAddr:           "127.0.0.1:50051",
-	GcInterval:           1 * time.Second,
+	GcInterval:           1 * time.Microsecond,
 	IdleDurationBeforeGC: 5 * time.Second, // original is 5 * time.Minute
-	MaxConcurrency:       math.MaxInt32,
 }
