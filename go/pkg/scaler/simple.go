@@ -32,13 +32,14 @@ import (
 )
 
 type Simple struct {
-	config         *config.Config
+	config         config.Config
 	metaData       *model2.Meta
 	platformClient platform_client2.Client
 	mu             sync.Mutex
 	wg             sync.WaitGroup
 	instances      map[string]*model2.Instance
 	idleInstance   *list.List
+	dataSet        *DataSet
 }
 
 func New(metaData *model2.Meta, config *config.Config) Scaler {
@@ -46,8 +47,8 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 	if err != nil {
 		log.Fatalf("client init with error: %s", err.Error())
 	}
-	scheduler := &Simple{
-		config:         config,
+	s := &Simple{
+		config:         *config,
 		metaData:       metaData,
 		platformClient: client,
 		mu:             sync.Mutex{},
@@ -57,14 +58,40 @@ func New(metaData *model2.Meta, config *config.Config) Scaler {
 	}
 	// 新创建一个scaler || key memoryMb
 	log.Printf("New          %s     %d", metaData.Key, metaData.MemoryInMb)
-	scheduler.wg.Add(1)
-	go func() {
-		defer scheduler.wg.Done()
-		scheduler.gcLoop()
-		log.Printf("gc loop for app: %s is stoped", metaData.Key)
-	}()
 
-	return scheduler
+	// 如果在 PreMap 中，则定义gc规则，并且preassign
+	if dataSet, ok := PreMap[metaData.Key]; ok {
+		s.dataSet = dataSet
+		switch dataSet.No {
+		case 1:
+			go s.BatchPreAssign(context.Background(), int(dataSet.Num))
+			go func() {
+				defer s.wg.Done()
+				s.gcLoopPreAssignForDataSet1and2()
+			}()
+		case 2:
+			go s.BatchPreAssign(context.Background(), int(dataSet.Num))
+			go func() {
+				defer s.wg.Done()
+				s.gcLoopPreAssignForDataSet1and2()
+			}()
+		default:
+			if len(metaData.Key) == 40 {
+				go s.BatchPreAssign(context.Background(), int(dataSet.Num))
+				go func() {
+					defer s.wg.Done()
+					s.gcLoopPreAssignForDataSet3()
+				}()
+			}
+		}
+	} else {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.gcLoop()
+		}()
+	}
+	return s
 }
 
 func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.AssignReply, error) {
