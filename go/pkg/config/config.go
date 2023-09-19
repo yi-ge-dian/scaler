@@ -14,7 +14,6 @@ limitations under the License.
 package config
 
 import (
-	"math"
 	"time"
 )
 
@@ -22,15 +21,13 @@ type Config struct {
 	ClientAddr           string
 	GcInterval           time.Duration
 	IdleDurationBeforeGC time.Duration
-	MaxConcurrency       int
 	Feature              map[string]int
 }
 
 var DefaultConfig = Config{
 	ClientAddr:           "127.0.0.1:50051",
-	GcInterval:           3 * time.Second,
+	GcInterval:           500 * time.Millisecond,
 	IdleDurationBeforeGC: 5 * time.Second, // original is 5 * time.Minute
-	MaxConcurrency:       math.MaxInt32,
 	Feature: map[string]int{
 		"nodes1":                      1,
 		"roles1":                      1,
